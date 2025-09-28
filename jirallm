@@ -116,6 +116,21 @@ def assigned(jira, _):
         print("Failed to generate summary")
 
 
+def watching(jira, _):
+    query = "watcher = currentUser() AND status in (\"new\", \"planning\", \"in progress\")"
+    ticket = query_tickets(jira, query)
+    if not ticket:
+        return
+
+    summary = summarise_tickets(ticket)
+    if summary:
+        print(f"Summary for {len(ticket)} tickets")
+        print("----------------------")
+        print(summary)
+    else:
+        print("Failed to generate summary")
+
+
 def summarise(jira, args):
     query = args.query
     ticket_list = query_tickets(jira, query)
@@ -139,6 +154,7 @@ def main():
     summarise_ticket_cmd.add_argument("ticket")
 
     subcmds.add_parser("assigned", help="describe tickets assigned to me")
+    subcmds.add_parser("watching", help="describe tickets I'm watching")
 
     summarise_cmd = subcmds.add_parser("summarise", help="summarise the results of a query")
     summarise_cmd.add_argument("query")
@@ -148,6 +164,7 @@ def main():
     cmdmap = {
         "summarise-ticket": summarise_ticket,
         "assigned": assigned,
+        "watching": watching,
         "summarise": summarise,
     }
 
