@@ -4,7 +4,7 @@ A very simple Python script that fetches ticket summaries and comments from Jira
 
 ## WHY
 
-This is a just a personal toy script.  It works for me, sometimes.  It can save me the trouble of going to Jira on the web to catch up on updates on one or more tickets and to get back into the general state of a group of tickets.
+This is a simple personal tool.  It works for me, most of the time.  It can save me the trouble of going to Jira on the web to catch up on updates on one or more tickets and to get back into the general state of a group of tickets.
 
 ## HOW
 
