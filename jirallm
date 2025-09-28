@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+import argparse
+import pathlib
+import subprocess as sp
+from typing import Any
+
+import requests
+from jira import JIRA
+
+# Ollama Configuration
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "gemma3"
+
+
+def token():
+    encrypted_token_path = pathlib.Path.home() / ".local/share/credentials/jira"
+    return sp.check_output(["systemd-creds", "decrypt", "--user", encrypted_token_path],
+                           encoding="utf-8").strip()
+
+
+def generate(prompt):
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "options": {
+            "temperature": 0.7,
+        },
+        "stream": False,
+        "think": False,
+    }
+
+    print(f"Asking {OLLAMA_MODEL} for a summary")
+    try:
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=600)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        ollama_output = response.json()["response"]
+        return ollama_output
+    except requests.exceptions.RequestException as e:
+        print(f"Error calling Ollama: {e}")
+        return None
+
+
+def crete_ticket_context(ticket):
+    summary = ticket.fields.summary
+    description = ticket.fields.description
+
+    context = [
+        f"Jira Ticket Key: {ticket.key}",
+        f"Summary: {summary}",
+        f"Description: {description}",
+    ]
+
+    comments = []
+    for comment in ticket.fields.comment.comments:
+        comments.append(f"Comment from {comment.author.displayName}: {comment.body}")
+
+    context += comments
+    return context
+
+
+def summarise_ticket(jira, args):
+    ticket_key = args.ticket
+    print(f"Getting information for {ticket_key}")
+    ticket = jira.issue(ticket_key)
+    context = crete_ticket_context(ticket)
+    prompt = "Summarize the following Jira ticket:\n" + "\n".join(context)
+
+    print(f"Summary:     {ticket.fields.summary}")
+    print(f"Description: {ticket.fields.description}")
+
+    summary = generate(prompt)
+
+    if summary:
+        print(f"Summary for {ticket}")
+        print(summary)
+    else:
+        print(f"Failed to generate summary for Jira ticket {ticket}")
+
+
+def query_tickets(jira, query):
+    print(f"Searching: {query}")
+    tickets = jira.search_issues(query, maxResults=100)
+
+    if not tickets:
+        print("No tickets found")
+        return None
+
+    print(f"Found {len(tickets)} tickets")
+    for ticket in tickets:
+        print(f"{ticket.key}: {ticket.fields.summary}")
+
+    return tickets
+
+
+def summarise_tickets(ticket_list):
+    context = []
+    for ticket in ticket_list:
+        context += crete_ticket_context(ticket)
+
+    prompt = "Write a short summary for all the following Jira tickets\n" + "\n".join(context)
+    return generate(prompt)
+
+
+def assigned(jira, _):
+    query = "assignee = currentUser() AND status in (\"new\", \"planning\", \"in progress\")"
+    ticket = query_tickets(jira, query)
+    if not ticket:
+        return
+
+    summary = summarise_tickets(ticket)
+    if summary:
+        print(f"Summary for {len(ticket)} tickets")
+        print("----------------------")
+        print(summary)
+    else:
+        print("Failed to generate summary")
+
+
+def summarise(jira, args):
+    query = args.query
+    ticket_list = query_tickets(jira, query)
+    if not ticket_list:
+        return
+
+    summary = summarise_tickets(ticket_list)
+    if summary:
+        print(f"Summary for {len(ticket_list)} tickets")
+        print("----------------------")
+        print(summary)
+    else:
+        print("Failed to generate summary")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    subcmds = parser.add_subparsers(title="commands", required=True, dest="cmd")
+
+    summarise_ticket_cmd = subcmds.add_parser("summarise-ticket", help="summarise a ticket")
+    summarise_ticket_cmd.add_argument("ticket")
+
+    subcmds.add_parser("assigned", help="describe tickets assigned to me")
+
+    summarise_cmd = subcmds.add_parser("summarise", help="summarise the results of a query")
+    summarise_cmd.add_argument("query")
+
+    args = parser.parse_args()
+
+    cmdmap = {
+        "summarise-ticket": summarise_ticket,
+        "assigned": assigned,
+        "summarise": summarise,
+    }
+
+    args = parser.parse_args()
+    cmd = args.cmd
+
+    jira_options: dict[str, Any] = {"server": "https://issues.redhat.com"}
+    jira = JIRA(options=jira_options, token_auth=token())
+
+    cmdmap[cmd](jira, args)
+
+
+if __name__ == "__main__":
+    main()
